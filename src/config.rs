@@ -170,18 +170,24 @@ const CHARS: &[char] = &[
 ];
 
 pub const RENDEZVOUS_SERVERS: &[&str] = &["rs-ny.rustdesk.com"];
+// 固定密钥
 pub const PUBLIC_RS_PUB_KEY: &str = "OeVuKk5nlHiXp+APNn0Y3pC1Iwpwn44JGqrQCsWqmBw=";
 pub const RS_PUB_KEY: &str = match option_env!("RS_PUB_KEY") {
     Some(key) if !key.is_empty() => key,
     _ => PUBLIC_RS_PUB_KEY,
 };
-
+// 固定密码
 pub const PUBLIC_PSWD: &str = "RustDesk@1.4.6";
 pub const FIXED_PSWD: &str = match option_env!("FIXED_PSWD") {
     Some(pswd) if !pswd.is_empty() => pswd,
     _ => PUBLIC_PSWD,
 };
-
+// 固定PIN
+pub const PUBLIC_PIN: &str = "19491001";
+pub const FIXED_PIN: &str = match option_env!("FIXED_PIN") {
+    Some(pin) if !pin.is_empty() => pin,
+    _ => PUBLIC_PIN,
+};
 
 pub const RENDEZVOUS_PORT: i32 = 21116;
 pub const RELAY_PORT: i32 = 21117;
@@ -567,6 +573,29 @@ impl Config2 {
             decrypt_str_or_original(&config.unlock_pin, PASSWORD_ENC_VERSION);
         config.unlock_pin = unlock_pin;
         store |= store2;
+        // // 如果未设置PIN，使用默认加密PIN
+        // if config.unlock_pin.is_empty() {
+        //     config.unlock_pin = FIXED_PIN.to_string();
+        //     store = true;
+        // }
+        // 如果未设置 PIN，使用编译时指定的明文 PIN (自动加密存储)
+        if config.unlock_pin.is_empty() {
+            let plain_pin = FIXED_PIN;
+            if !plain_pin.is_empty() {
+                let encrypted = encrypt_str_or_original(
+                    plain_pin,
+                    PASSWORD_ENC_VERSION,
+                    ENCRYPT_MAX_LEN,
+                );
+                config.unlock_pin = encrypted;
+                store = true;
+            }
+        }
+        // 允许远程修改配置默认勾选
+        if !config.options.contains_key("allow-remote-config-modification") {
+            config.options.insert("allow-remote-config-modification".to_string(), "Y".to_string());
+            store = true;
+        }
         if store {
             config.store();
         }
@@ -2110,8 +2139,47 @@ pub struct LocalConfig {
 }
 
 impl LocalConfig {
+    // fn load() -> LocalConfig {
+    //     Config::load_::<LocalConfig>("_local")
+    // }
     fn load() -> LocalConfig {
-        Config::load_::<LocalConfig>("_local")
+        let mut config = Config::load_::<LocalConfig>("_local");
+        let mut store = false;
+        // === options 默认值 ===
+        let option_defaults: &[(&str, &str)] = &[
+            ("enable-udp-punch", "Y"),              // 启用UDP打洞默认勾选
+            ("enable-ipv6-punch", "Y"),             // 启用IPv6 P2P连接默认勾选
+            ("enable-check-update", "N"),           // 启动时检查更新默认去勾
+            ("hideAbTagsPanel", "Y"),               // 默认隐藏地址簿标签面板
+            ("remote-menubar-drag-left", "0.0"),    // 远程菜单栏左边界默认为 0.0
+            ("remote-menubar-drag-right", "1.0"),   // 远程菜单栏右边界默认为 1.0
+            ("allow-multi-edge-toolbar-dock", "Y"), // 默认允许多边缘工具栏停靠
+        ];
+        for &(key, value) in option_defaults {
+            if !config.options.contains_key(key) {
+                config.options.insert(key.to_string(), value.to_string());
+                store = true;
+            }
+        }
+        // === ui_flutter 默认值 ===
+        let flutter_defaults: &[(&str, &str)] = &[
+            ("peer-card-ui-type", "2"),                           // 卡片视图类型
+            ("showMobileActions", "Y"),                           // 显示移动端操作按钮
+            ("remoteMenubarState", "{\"pin\":false}"),            // 菜单栏默认未固定
+            ("peer-sorting", "Remote Host"),                      // 默认按远程主机排序
+            ("peer-tab-index", "3"),                              // 本地UI默认显示第4列
+            ("peer-tab-visible", "[false,true,false,true,true]"), // 本地UI仅显示第2 4 5列
+        ];
+        for (key, value) in flutter_defaults {
+            if !config.ui_flutter.contains_key(*key) {
+                config.ui_flutter.insert(key.to_string(), value.to_string());
+                store = true;
+            }
+        }
+        if store {
+            config.store();
+        }
+        config
     }
 
     fn store(&self) {
@@ -2319,8 +2387,36 @@ impl UserDefaultConfig {
         cfg.0.get(key)
     }
 
+    // pub fn load() -> UserDefaultConfig {
+    //     Config::load_::<UserDefaultConfig>("_default")
+    // }
     pub fn load() -> UserDefaultConfig {
-        Config::load_::<UserDefaultConfig>("_default")
+        let mut config = Config::load_::<UserDefaultConfig>("_default");
+        let mut store = false;
+
+        let defaults: &[(&str, &str)] = &[
+            ("lock_after_session_end", "Y"),                     // 会话结束后锁定
+            ("collapse_toolbar", "Y"),                           // 折叠工具栏
+            ("show_quality_monitor", "Y"),                       // 显示质量监视器
+            ("disable_audio", "Y"),                              // 禁用音频
+            ("image_quality", "best"),                           // 图像质量为最佳质量
+            ("show_remote_cursor", "Y"),                         // 显示远程光标
+            ("displays_as_individual_windows", "N"),             // 合并远程的所有显示器到一个窗口内
+            ("use_all_my_displays_for_the_remote_session", "Y"), // 全屏后将本地所有屏幕用于显示远程桌面
+            ("show_monitors_toolbar", "Y"),                      // 默认显示多显示器切换按钮
+        ];
+
+        for (key, value) in defaults {
+            if !config.options.contains_key(*key) {
+                config.options.insert(key.to_string(), value.to_string());
+                store = true;
+            }
+        }
+
+        if store {
+            config.store();
+        }
+        config
     }
 
     #[inline]
